@@ -19,6 +19,7 @@
 #
 #
 
+import collections.abc
 import logging
 from typing import (
     TYPE_CHECKING,
@@ -47,7 +48,7 @@ from synapse.api.constants import (
 )
 from synapse.api.room_versions import PushRuleRoomFlag
 from synapse.event_auth import auth_types_for_event, get_user_power_level
-from synapse.events import EventBase, relation_from_event
+from synapse.events import EventBase, relations_from_event
 from synapse.events.snapshot import EventContext
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.state import POWER_KEY
@@ -100,9 +101,9 @@ def _should_count_as_unread(event: EventBase, context: EventContext) -> bool:
         return False
 
     # Exclude edits.
-    relates_to = relation_from_event(event)
-    if relates_to and relates_to.rel_type == RelationTypes.REPLACE:
-        return False
+    for relates_to in relations_from_event(event):
+        if relates_to.rel_type == RelationTypes.REPLACE:
+            return False
 
     # Mark events that have a non-empty string body as unread.
     body = event.content.get("body")
@@ -276,37 +277,42 @@ class BulkPushRuleEvaluator:
         """
         related_events: Dict[str, Dict[str, JsonValue]] = {}
         if self._related_event_match_enabled:
-            related_event_id = event.content.get("m.relates_to", {}).get("event_id")
-            relation_type = event.content.get("m.relates_to", {}).get("rel_type")
-            if related_event_id is not None and relation_type is not None:
-                related_event = await self.store.get_event(
-                    related_event_id, allow_none=True
-                )
-                if related_event is not None:
-                    related_events[relation_type] = _flatten_dict(related_event)
+            relations = event.content.get("m.relations")
+            if not relations or not isinstance(relations, list):
+                relations = [event.content.get("m.relates_to")]
 
-            reply_event_id = (
-                event.content.get("m.relates_to", {})
-                .get("m.in_reply_to", {})
-                .get("event_id")
-            )
+            for relation in relations:
+                if not relation or not isinstance(relation, collections.abc.Mapping):
+                    continue
 
-            # convert replies to pseudo relations
-            if reply_event_id is not None:
-                related_event = await self.store.get_event(
-                    reply_event_id, allow_none=True
-                )
+                related_event_id = relation.get("event_id")
+                relation_type = relation.get("rel_type")
+                if related_event_id is not None and relation_type is not None:
+                    related_event = await self.store.get_event(
+                        related_event_id, allow_none=True
+                    )
+                    if related_event is not None:
+                        related_events[relation_type] = _flatten_dict(related_event)
 
-                if related_event is not None:
-                    related_events["m.in_reply_to"] = _flatten_dict(related_event)
+                reply_event_id = relation.get("m.in_reply_to", {}).get("event_id")
 
-                    # indicate that this is from a fallback relation.
-                    if relation_type == "m.thread" and event.content.get(
-                        "m.relates_to", {}
-                    ).get("is_falling_back", False):
-                        related_events["m.in_reply_to"]["im.vector.is_falling_back"] = (
-                            ""
-                        )
+                # convert replies to pseudo relations
+                # XXX: does this need any changes for multiple relations?
+                if reply_event_id is not None:
+                    related_event = await self.store.get_event(
+                        reply_event_id, allow_none=True
+                    )
+
+                    if related_event is not None:
+                        related_events["m.in_reply_to"] = _flatten_dict(related_event)
+
+                        # indicate that this is from a fallback relation.
+                        if relation_type == "m.thread" and event.content.get(
+                            "m.relates_to", {}
+                        ).get("is_falling_back", False):
+                            related_events["m.in_reply_to"][
+                                "im.vector.is_falling_back"
+                            ] = ""
 
         return related_events
 
@@ -393,11 +399,10 @@ class BulkPushRuleEvaluator:
             )
         )
 
-        # Find the event's thread ID.
-        relation = relation_from_event(event)
         # If the event does not have a relation, then it cannot have a thread ID.
         thread_id = MAIN_TIMELINE
-        if relation:
+        # Find the event's thread ID.
+        for relation in relations_from_event(event):
             # Recursively attempt to find the thread this event relates to.
             if relation.rel_type == RelationTypes.THREAD:
                 thread_id = relation.parent_id

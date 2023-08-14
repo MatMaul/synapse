@@ -205,7 +205,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     row.type,
                     row.state_key,
                     row.redacts,
-                    row.relates_to,
+                    [row.relates_to],
                     backfilled=True,
                 )
         elif stream_name == CachesStream.NAME:
@@ -261,7 +261,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 data.type,
                 data.state_key,
                 data.redacts,
-                data.relates_to,
+                [data.relates_to] if type(data.relates_to) is str else [],
                 backfilled=False,
             )
         elif row.type == EventsStreamCurrentStateRow.TypeId:
@@ -306,7 +306,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         etype: str,
         state_key: Optional[str],
         redacts: Optional[str],
-        relates_to: Optional[str],
+        relations: List[str],
         backfilled: bool,
     ) -> None:
         # XXX: If you add something to this function make sure you add it to
@@ -378,14 +378,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         if (etype, state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
             self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
-        if relates_to:
-            self._attempt_to_invalidate_cache(
-                "get_relations_for_event",
-                (
-                    room_id,
-                    relates_to,
-                ),
-            )
+        for relates_to in relations:
+            self._attempt_to_invalidate_cache("get_relations_for_event", (room_id, relates_to,))
             self._attempt_to_invalidate_cache("get_references_for_event", (relates_to,))
             self._attempt_to_invalidate_cache("get_applicable_edit", (relates_to,))
             self._attempt_to_invalidate_cache("get_thread_summary", (relates_to,))

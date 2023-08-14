@@ -1238,29 +1238,32 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     )
                     continue
 
-                # If there's no relation, skip!
-                relates_to = event_json["content"].get("m.relates_to")
-                if not relates_to or not isinstance(relates_to, dict):
-                    continue
+                relations = event_json["content"].get("m.relations")
+                if not relations or not isinstance(relations, list):
+                    relations = [event_json["content"].get("m.relates_to")]
 
-                # If the relation type or parent event ID is not a string, skip it.
-                #
-                # Do not consider relation types that have existed for a long time,
-                # since they will already be listed in the `event_relations` table.
-                rel_type = relates_to.get("rel_type")
-                if not isinstance(rel_type, str) or rel_type in (
-                    RelationTypes.ANNOTATION,
-                    RelationTypes.REFERENCE,
-                    RelationTypes.REPLACE,
-                ):
-                    continue
+                for relates_to in relations:
+                    if not relates_to or not isinstance(relates_to, dict):
+                        continue
 
-                parent_id = relates_to.get("event_id")
-                if not isinstance(parent_id, str):
-                    continue
+                    # If the relation type or parent event ID is not a string, skip it.
+                    #
+                    # Do not consider relation types that have existed for a long time,
+                    # since they will already be listed in the `event_relations` table.
+                    rel_type = relates_to.get("rel_type")
+                    if not isinstance(rel_type, str) or rel_type in (
+                        RelationTypes.ANNOTATION,
+                        RelationTypes.REFERENCE,
+                        RelationTypes.REPLACE,
+                    ):
+                        continue
 
-                room_id = event_json["room_id"]
-                relations_to_insert.append((room_id, event_id, parent_id, rel_type))
+                    parent_id = relates_to.get("event_id")
+                    if not isinstance(parent_id, str):
+                        continue
+
+                    room_id = event_json["room_id"]
+                    relations_to_insert.append((room_id, event_id, parent_id, rel_type))
 
             # Insert the missing data, note that we upsert here in case the event
             # has already been processed.
@@ -1268,10 +1271,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 self.db_pool.simple_upsert_many_txn(
                     txn=txn,
                     table="event_relations",
-                    key_names=("event_id",),
-                    key_values=[(r[1],) for r in relations_to_insert],
-                    value_names=("relates_to_id", "relation_type"),
-                    value_values=[r[2:] for r in relations_to_insert],
+                    key_names=("event_id", "relates_to_id", "relation_type"),
+                    key_values=[r[1:] for r in relations_to_insert],
+                    value_names=(),
+                    value_values=[],
                 )
 
                 # Iterate the parent IDs and invalidate caches.
