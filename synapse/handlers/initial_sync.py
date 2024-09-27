@@ -62,6 +62,7 @@ class InitialSyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
+        self.federation_handler = hs.get_federation_handler()
         self.state_handler = hs.get_state_handler()
         self.hs = hs
         self.state = hs.get_state_handler()
@@ -312,6 +313,9 @@ class InitialSyncHandler:
         blocked = await self.store.is_room_blocked(room_id)
         if blocked:
             raise SynapseError(403, "This room has been blocked on this server")
+
+        if not await self.store.get_room(room_id):
+            await self.federation_handler.peek_room(room_id)
 
         (
             membership,

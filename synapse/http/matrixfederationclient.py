@@ -668,7 +668,7 @@ class MatrixFederationHttpClient:
             while True:
                 try:
                     json = request.get_json()
-                    if json:
+                    if json is not None:
                         headers_dict[b"Content-Type"] = [b"application/json"]
                         auth_headers = self.build_auth_headers(
                             destination_bytes, method_bytes, url_to_sign_bytes, json

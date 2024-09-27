@@ -66,7 +66,7 @@ from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
 from synapse.events.validator import EventValidator
-from synapse.federation.federation_client import InvalidResponseError
+from synapse.federation.federation_client import InvalidResponseError, PeekRoomResult
 from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
@@ -78,7 +78,7 @@ from synapse.replication.http.federation import (
     ReplicationStoreRoomOnOutlierMembershipRestServlet,
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.types import JsonDict, StrCollection, get_domain_from_id
+from synapse.types import JsonDict, RoomID, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
@@ -583,6 +583,30 @@ class FederationHandler:
         )
         return list(auth)
 
+    async def peek_room(
+        self,
+        room_id: str,
+    ) -> None:
+        response = await self.federation_client.peek_room(
+            [RoomID.from_string(room_id).domain],
+            room_id,
+            {"ver": KNOWN_ROOM_VERSIONS},
+        )
+
+        # Create event needed by upsert_room_on_join should always be in the common state
+        await self.store.upsert_room_on_join(
+            room_id=room_id,
+            room_version=response.room_version,
+            state_events=response.common_state,
+        )
+
+        await self._federation_event_handler.process_remote_peek(
+            room_id,
+            response.latest_event_states,
+            response.common_state,
+            response.room_version,
+        )
+
     async def do_invite_join(
         self, target_hosts: Iterable[str], room_id: str, joinee: str, content: JsonDict
     ) -> Tuple[str, int]:
@@ -908,6 +932,16 @@ class FederationHandler:
                 logger.warning(
                     "Error handling queued PDU %s from %s: %s", p.event_id, origin, e
                 )
+
+    async def on_peek_request(
+        self,
+        origin: str,
+        room_id: str,
+    ) -> Iterable[str]:
+        await self.store.add_peeked_room(origin, room_id)
+        return [
+            ex[0] for ex in await self.store.get_forward_extremities_for_room(room_id)
+        ]
 
     async def on_make_join_request(
         self, origin: str, room_id: str, user_id: str
@@ -1327,7 +1361,10 @@ class FederationHandler:
     ) -> List[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
-        await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
+        # TODO filter events before world_readable
+        await self._event_auth_handler.assert_host_in_room_or_world_readable(
+            room_id, origin, True
+        )
 
         # Synapse asks for 100 events per backfill request. Do not allow more.
         limit = min(limit, 100)
@@ -1382,7 +1419,10 @@ class FederationHandler:
         if not event:
             return None
 
-        await self._event_auth_handler.assert_host_in_room(event.room_id, origin)
+        # TODO filter events before world_readable
+        await self._event_auth_handler.assert_host_in_room_or_world_readable(
+            event.room_id, origin
+        )
 
         events = await filter_events_for_server(
             self._storage_controllers,
@@ -1406,7 +1446,10 @@ class FederationHandler:
     ) -> List[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
-        await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
+        # TODO filter events before world_readable
+        await self._event_auth_handler.assert_host_in_room_or_world_readable(
+            room_id, origin, True
+        )
 
         # Only allow up to 20 events to be retrieved per request.
         limit = min(limit, 20)

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, List, Mapping, Optional, Union
 from synapse import event_auth
 from synapse.api.constants import (
     EventTypes,
+    HistoryVisibility,
     JoinRules,
     Membership,
     RestrictedJoinRuleTypes,
@@ -184,7 +185,7 @@ class EventAuthHandler:
     async def is_host_in_room(self, room_id: str, host: str) -> bool:
         return await self._store.is_host_joined(room_id, host)
 
-    async def assert_host_in_room(
+    async def assert_host_in_room_or_world_readable(
         self, room_id: str, host: str, allow_partial_state_rooms: bool = False
     ) -> None:
         """
@@ -197,6 +198,16 @@ class EventAuthHandler:
         this function may return an incorrect result as we are not able to fully
         track server membership in a room without full state.
         """
+        visibility = await self._state_storage_controller.get_current_state_event(
+            room_id, EventTypes.RoomHistoryVisibility, ""
+        )
+        if (
+            visibility
+            and visibility.content.get("history_visibility")
+            == HistoryVisibility.WORLD_READABLE
+        ):
+            return
+
         if await self._store.is_partial_state_room(room_id):
             if allow_partial_state_rooms:
                 current_hosts = await self._state_storage_controller.get_current_hosts_in_room_or_partial_state_approximation(

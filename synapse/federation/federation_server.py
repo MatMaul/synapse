@@ -21,6 +21,7 @@
 #
 import logging
 import random
+from functools import reduce
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -44,6 +45,7 @@ from synapse.api.constants import (
     EduTypes,
     EventContentFields,
     EventTypes,
+    HistoryVisibility,
     Membership,
 )
 from synapse.api.errors import (
@@ -575,7 +577,9 @@ class FederationServer(FederationBase):
     async def on_room_state_request(
         self, origin: str, room_id: str, event_id: str
     ) -> Tuple[int, JsonDict]:
-        await self._event_auth_handler.assert_host_in_room(room_id, origin)
+        await self._event_auth_handler.assert_host_in_room_or_world_readable(
+            room_id, origin
+        )
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
 
@@ -602,7 +606,9 @@ class FederationServer(FederationBase):
         if not event_id:
             raise NotImplementedError("Specify an event")
 
-        await self._event_auth_handler.assert_host_in_room(room_id, origin)
+        await self._event_auth_handler.assert_host_in_room_or_world_readable(
+            room_id, origin
+        )
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
 
@@ -999,13 +1005,79 @@ class FederationServer(FederationBase):
         self, origin: str, room_id: str, event_id: str
     ) -> Tuple[int, Dict[str, Any]]:
         async with self._server_linearizer.queue((origin, room_id)):
-            await self._event_auth_handler.assert_host_in_room(room_id, origin)
+            await self._event_auth_handler.assert_host_in_room_or_world_readable(
+                room_id, origin
+            )
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
 
             time_now = self._clock.time_msec()
             auth_pdus = await self.handler.on_event_auth(event_id)
             res = {"auth_chain": [a.get_pdu_json(time_now) for a in auth_pdus]}
+        return 200, res
+
+    async def on_peek(
+        self, origin: str, room_id: str, supported_versions: List[str]
+    ) -> Tuple[int, Dict[str, Any]]:
+        room_version = await self.store.get_room_version_id(room_id)
+        if room_version not in supported_versions:
+            logger.warning(
+                "Room version %s not in %s", room_version, supported_versions
+            )
+            raise IncompatibleRoomVersionError(room_version=room_version)
+
+        visibility = await self._state_storage_controller.get_current_state_event(
+            room_id, EventTypes.RoomHistoryVisibility, ""
+        )
+        if (
+            visibility
+            and visibility.content.get("history_visibility")
+            != HistoryVisibility.WORLD_READABLE
+        ):
+            raise SynapseError(403, "", Codes.FORBIDDEN)  # TODO msg
+
+        fw_extremities = await self.handler.on_peek_request(origin, room_id)
+
+        state_for_each_extrem = {
+            extrem: set(
+                (
+                    await self._state_storage_controller.get_state_after_event(
+                        extrem, await_full_state=False
+                    )
+                ).values()
+            )
+            for extrem in fw_extremities
+        }
+
+        common_state_ids = reduce(
+            set.intersection,
+            state_for_each_extrem.values(),
+        )
+
+        latest_event_state_ids = {
+            extrem: list(state.difference(common_state_ids))
+            for extrem, state in state_for_each_extrem.items()
+        }
+
+        all_event_ids = (
+            common_state_ids
+            | latest_event_state_ids.keys()
+            | {event for events in latest_event_state_ids.values() for event in events}
+        )
+
+        auth_event_ids = await self.store.get_auth_chain_ids(room_id, all_event_ids)
+
+        events = [
+            (await self.store.get_event(event_id)).get_dict()
+            for event_id in all_event_ids | auth_event_ids
+        ]
+
+        res = {
+            "latest_event_state_ids": latest_event_state_ids,
+            "common_state_ids": list(common_state_ids),
+            "events": events,
+            "room_version": room_version,
+        }
         return 200, res
 
     async def on_query_client_keys(

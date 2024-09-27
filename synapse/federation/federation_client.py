@@ -73,7 +73,7 @@ from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
-from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types import JsonDict, StateMap, StrCollection, UserID, get_domain_from_id
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.retryutils import NotRetryingDestination
@@ -124,6 +124,14 @@ class SendJoinResult:
     # If 'partial_state' is set, a set of the servers in the room (otherwise empty).
     # Always contains the server we joined off.
     servers_in_room: AbstractSet[str]
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class PeekRoomResult:
+    # A string giving the server the event was sent to.
+    latest_event_states: Dict[EventBase, List[EventBase]]
+    common_state: List[EventBase]
+    room_version: RoomVersion
 
 
 class FederationClient(FederationBase):
@@ -1449,6 +1457,90 @@ class FederationClient(FederationBase):
             room_id=pdu.room_id,
             event_id=pdu.event_id,
             content=pdu.get_pdu_json(time_now),
+        )
+
+    async def peek_room(
+        self,
+        destinations: Iterable[str],
+        room_id: str,
+        params: Optional[Mapping[str, Union[str, Iterable[str]]]],
+    ) -> PeekRoomResult:
+        async def send_request(destination: str) -> PeekRoomResult:
+            ret = await self.transport_layer.peek_room(destination, room_id, params)
+
+            # Note: If not supplied, the room version may be either v1 or v2,
+            # however either way the event format version will be v1.
+            room_version_id = ret.get("room_version", RoomVersions.V1.identifier)
+            room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
+            if not room_version:
+                raise UnsupportedRoomVersionError()
+
+            logger.debug("Got response to peek_room: %s", ret)
+
+            room_version_str = ret.get("room_version")
+            if not isinstance(room_version_str, str):
+                raise InvalidResponseError("room_version is not a string.")
+            room_version = KNOWN_ROOM_VERSIONS.get(room_version_str)
+            if not room_version:
+                raise InvalidResponseError("Unknown room version.")
+
+            dict_events = ret.get("events")
+            if not isinstance(dict_events, List):
+                raise InvalidResponseError("events is not a list.")
+
+            events: Dict[str, EventBase] = {}
+            for dict_event in dict_events:
+                if isinstance(dict_event, Dict):
+                    e = make_event_from_dict(dict_event, room_version=room_version)
+                    events[e.event_id] = e
+
+            common_state_ids = ret.get("common_state_ids")
+            if not isinstance(common_state_ids, List):
+                raise InvalidResponseError("common_state_ids is not a list.")
+            common_state: List[EventBase] = []
+            for event_id in common_state_ids:
+                state_event = events.get(event_id)
+                if not state_event:
+                    raise InvalidResponseError(
+                        "Event ID in common_state_ids not present in events."
+                    )
+                common_state.append(state_event)
+
+            latest_event_state_ids = ret.get("latest_event_state_ids")
+            if not isinstance(latest_event_state_ids, Dict):
+                raise InvalidResponseError("latest_event_state_ids is not a map.")
+
+            latest_event_states: Dict[EventBase, List[EventBase]] = {}
+            for latest_event_id, state_ids in latest_event_state_ids.items():
+                if not isinstance(state_ids, List) or not isinstance(
+                    latest_event_id, str
+                ):
+                    raise InvalidResponseError(
+                        "Wrong format for latest_event_state_ids."
+                    )
+                latest_event = events.get(latest_event_id)
+                if not latest_event:
+                    raise InvalidResponseError(
+                        "Latest event ID in latest_event_state_ids not present in events."
+                    )
+                latest_event_states[latest_event] = []
+                for event_id in state_ids:
+                    state_event = events.get(event_id)
+                    if not state_event:
+                        raise InvalidResponseError(
+                            "State event ID in latest_event_state_ids not present in events."
+                        )
+                    latest_event_states[latest_event].append(state_event)
+
+            return PeekRoomResult(latest_event_states, common_state, room_version)
+
+        failover_errcodes = {Codes.NOT_FOUND}
+
+        return await self._try_destination_list(
+            "peek_room",
+            destinations,
+            send_request,
+            failover_errcodes=failover_errcodes,
         )
 
     async def get_public_rooms(

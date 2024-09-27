@@ -94,6 +94,22 @@ class TransportLayerClient:
             try_trailing_slash_on_400=True,
         )
 
+    async def peek_room(
+        self,
+        destination: str,
+        room_id: str,
+        params: Optional[Mapping[str, Union[str, Iterable[str]]]],
+    ) -> JsonDict:
+        logger.debug("peek dest=%s, room=%s", destination, room_id)
+
+        path = _create_v1_path("/peek/%s", room_id)
+        return await self.client.put_json(
+            destination,
+            path=path,
+            args=params,
+            data={},
+        )
+
     async def get_room_state(
         self, room_version: RoomVersion, destination: str, room_id: str, event_id: str
     ) -> "StateRequestResponse":

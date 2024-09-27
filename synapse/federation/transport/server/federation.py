@@ -420,6 +420,24 @@ class FederationEventAuthServlet(BaseFederationServerServlet):
         return await self.handler.on_event_auth(origin, room_id, event_id)
 
 
+class FederationPeekServlet(BaseFederationServerServlet):
+    PATH = "/peek/(?P<room_id>[^/]*)"
+    CATEGORY = "Federation requests"
+
+    async def on_PUT(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: Dict[bytes, List[bytes]],
+        room_id: str,
+    ) -> Tuple[int, JsonDict]:
+        supported_versions = parse_strings_from_args(query, "ver", encoding="utf-8")
+        if supported_versions is None:
+            supported_versions = ["1"]
+
+        return await self.handler.on_peek(origin, room_id, supported_versions)
+
+
 class FederationV1SendJoinServlet(BaseFederationServerServlet):
     PATH = "/send_join/(?P<room_id>[^/]*)/(?P<event_id>[^/]*)"
     CATEGORY = "Federation requests"
@@ -899,6 +917,7 @@ FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationV2InviteServlet,
     FederationGetMissingEventsServlet,
     FederationEventAuthServlet,
+    FederationPeekServlet,
     FederationClientKeysQueryServlet,
     FederationUserDevicesQueryServlet,
     FederationClientKeysClaimServlet,

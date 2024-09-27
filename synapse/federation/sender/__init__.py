@@ -616,6 +616,10 @@ class FederationSender(AbstractFederationSender):
                             )
                             return
 
+                    destinations = set(
+                        destinations
+                    ) | await self.store.get_peeking_destinations(event.room_id)
+
                     sharded_destinations = {
                         d
                         for d in destinations

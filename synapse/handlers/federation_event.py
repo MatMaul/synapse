@@ -468,6 +468,52 @@ class FederationEventHandler:
         )
 
     @trace
+    async def process_remote_peek(
+        self,
+        room_id: str,
+        latest_event_states: Dict[EventBase, List[EventBase]],
+        common_state: List[EventBase],
+        room_version: RoomVersion,
+    ) -> None:
+        create_event = None
+        for e in common_state:
+            if (e.type, e.state_key) == (EventTypes.Create, ""):
+                create_event = e
+                break
+
+        if create_event is None:
+            # If the state doesn't have a create event then the room is
+            # invalid, and it would fail auth checks anyway.
+            raise SynapseError(400, "No create event in state")
+
+        room_version_id = create_event.content.get(
+            "room_version", RoomVersions.V1.identifier
+        )
+
+        if room_version.identifier != room_version_id:
+            raise SynapseError(400, "Room version mismatch")
+
+        await self._auth_and_persist_outliers(
+            room_id, itertools.chain(common_state, *latest_event_states.values())
+        )
+
+        event_and_contexts: List[Tuple[EventBase, EventContext]] = []
+        for latest_event, state in latest_event_states.items():
+            state_ids_before_event = {
+                (e.type, e.state_key): e.event_id for e in itertools.chain(state, common_state)
+            }
+            context = await self._state_handler.compute_event_context(
+                latest_event,
+                state_ids_before_event=state_ids_before_event,
+                partial_state=False,
+            )
+            event_and_contexts.append((latest_event, context))
+
+        await self.persist_events_and_notify(
+            room_id, event_and_contexts
+        )
+
+    @trace
     async def process_remote_join(
         self,
         origin: str,

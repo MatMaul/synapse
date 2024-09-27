@@ -2618,3 +2618,31 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 WHERE stream_id <= ?
             """
             txn.execute(sql, (device_lists_stream_id,))
+
+    async def add_peeked_room(
+        self,
+        server_name: str,
+        room_id: str,
+    ) -> None:
+        await self.db_pool.simple_upsert(
+            table="peeked_rooms",
+            keyvalues={
+                "server_name": server_name,
+                "room_id": room_id,
+            },
+            values={},
+            desc="add_peeked_room",
+        )
+
+    async def get_peeking_destinations(self, room_id: str) -> Set[str]:
+        rows = cast(
+            List[Tuple[str]],
+            await self.db_pool.simple_select_list(
+                table="peeked_rooms",
+                keyvalues={"room_id": room_id},
+                retcols=("server_name",),
+                desc="get_peeked_rooms",
+            ),
+        )
+
+        return {server_name for (server_name,) in rows}
