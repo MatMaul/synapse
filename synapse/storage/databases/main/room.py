@@ -2623,14 +2623,19 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self,
         server_name: str,
         room_id: str,
+        peek_id: str,
+        expires_ts: int,
     ) -> None:
         await self.db_pool.simple_upsert(
             table="peeked_rooms",
             keyvalues={
                 "server_name": server_name,
                 "room_id": room_id,
+                "peek_id": peek_id,
             },
-            values={},
+            values={
+                "expires_ts": expires_ts,
+            },
             desc="add_peeked_room",
         )
 

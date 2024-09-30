@@ -27,6 +27,7 @@ import itertools
 import logging
 from enum import Enum
 from http import HTTPStatus
+import time
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -88,6 +89,8 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PEEK_EXPIRE_SECONDS = 86400  # A day
 
 # Added to debug performance and track progress on optimizations
 backfill_processing_before_timer = Histogram(
@@ -937,11 +940,17 @@ class FederationHandler:
         self,
         origin: str,
         room_id: str,
-    ) -> Iterable[str]:
-        await self.store.add_peeked_room(origin, room_id)
+        peek_id: str,
+    ) -> Tuple[Iterable[str], int]:
+        await self.store.add_peeked_room(
+            origin,
+            room_id,
+            peek_id,
+            (int(time.time()) + DEFAULT_PEEK_EXPIRE_SECONDS) * 1000,
+        )
         return [
             ex[0] for ex in await self.store.get_forward_extremities_for_room(room_id)
-        ]
+        ], DEFAULT_PEEK_EXPIRE_SECONDS * 1000
 
     async def on_make_join_request(
         self, origin: str, room_id: str, user_id: str

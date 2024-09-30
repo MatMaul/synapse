@@ -1017,7 +1017,7 @@ class FederationServer(FederationBase):
         return 200, res
 
     async def on_peek(
-        self, origin: str, room_id: str, supported_versions: List[str]
+        self, origin: str, room_id: str, peek_id: str, supported_versions: List[str]
     ) -> Tuple[int, Dict[str, Any]]:
         room_version = await self.store.get_room_version_id(room_id)
         if room_version not in supported_versions:
@@ -1036,11 +1036,13 @@ class FederationServer(FederationBase):
         ):
             raise SynapseError(403, "", Codes.FORBIDDEN)  # TODO msg
 
-        fw_extremities = await self.handler.on_peek_request(origin, room_id)
+        fw_extremities, renewal_interval = await self.handler.on_peek_request(origin, room_id, peek_id)
 
         state_for_each_extrem = {
             extrem: set(
                 (
+                    # TODO it should be before evetn to match expectation on th receiving side
+                    # since `compute_event_context` takes `state_ids_before_event`
                     await self._state_storage_controller.get_state_after_event(
                         extrem, await_full_state=False
                     )
@@ -1077,6 +1079,7 @@ class FederationServer(FederationBase):
             "common_state_ids": list(common_state_ids),
             "events": events,
             "room_version": room_version,
+            "renewal_interval": renewal_interval,
         }
         return 200, res
 

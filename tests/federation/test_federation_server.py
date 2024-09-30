@@ -179,6 +179,20 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         tok2 = self.login("fozzie", "bear")
         self.helper.join(self._room_id, second_member_user_id, tok=tok2)
 
+        self.helper.send_state(
+            self._room_id,
+            "m.room.history_visibility",
+            {"history_visibility": "world_readable"},
+            tok,
+        )
+
+        self.helper.send_event(
+            self._room_id,
+            "m.room.message",
+            {"msgtype": "m.text", "body": "test"},
+            tok=tok,
+        )
+
     def _make_join(self, user_id: str) -> JsonDict:
         channel = self.make_signed_federation_request(
             "GET",
@@ -353,6 +367,52 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     #   replication, at which point the tests.handlers.room_member test
     #       test_local_users_joining_on_another_worker_contribute_to_rate_limit
     #   is probably sufficient to reassure that the bucket is updated.
+
+    def test_peek_room(self) -> None:
+        """happy-path test of send_join"""
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v1/peek/{self._room_id}/x?ver={DEFAULT_ROOM_VERSION}",
+            content={},
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # # we should get complete room state back
+        # returned_state = [
+        #     (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
+        # ]
+        # self.assertCountEqual(
+        #     returned_state,
+        #     [
+        #         ("m.room.create", ""),
+        #         ("m.room.power_levels", ""),
+        #         ("m.room.join_rules", ""),
+        #         ("m.room.history_visibility", ""),
+        #         ("m.room.member", "@kermit:test"),
+        #         ("m.room.member", "@fozzie:test"),
+        #         # nb: *not* the joining user
+        #     ],
+        # )
+
+        # # also check the auth chain
+        # returned_auth_chain_events = [
+        #     (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
+        # ]
+        # self.assertCountEqual(
+        #     returned_auth_chain_events,
+        #     [
+        #         ("m.room.create", ""),
+        #         ("m.room.member", "@kermit:test"),
+        #         ("m.room.power_levels", ""),
+        #         ("m.room.join_rules", ""),
+        #     ],
+        # )
+
+        # # the room should show that the new user is a member
+        # r = self.get_success(
+        #     self._storage_controllers.state.get_current_state(self._room_id)
+        # )
+        # self.assertEqual(r[("m.room.member", joining_user)].membership, "join")
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:
