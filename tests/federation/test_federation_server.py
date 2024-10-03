@@ -368,6 +368,40 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     #       test_local_users_joining_on_another_worker_contribute_to_rate_limit
     #   is probably sufficient to reassure that the bucket is updated.
 
+
+class PeekRoomFederationTests(unittest.FederatingHomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self._storage_controllers = hs.get_storage_controllers()
+
+        # create the room
+        creator_user_id = self.register_user("kermit", "test")
+        tok = self.login("kermit", "test")
+        self._room_id = self.helper.create_room_as(
+            room_creator=creator_user_id, tok=tok
+        )
+
+        self.helper.send_state(
+            self._room_id,
+            "m.room.history_visibility",
+            {"history_visibility": "world_readable"},
+            tok,
+        )
+
+        self.helper.send_event(
+            self._room_id,
+            "m.room.message",
+            {"msgtype": "m.text", "body": "test"},
+            tok=tok,
+        )
+
     def test_peek_room(self) -> None:
         """happy-path test of send_join"""
         channel = self.make_signed_federation_request(
