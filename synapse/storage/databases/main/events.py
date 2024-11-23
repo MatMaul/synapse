@@ -936,9 +936,7 @@ class PersistEventsStore:
             if event.redacts:
                 self.store.invalidate_get_event_cache_after_txn(txn, event.redacts)
 
-            relations = list(
-                map(lambda rel: rel.parent_id, relations_from_event(event))
-            )
+            relations = [rel.parent_id for rel in relations_from_event(event)]
 
             assert event.internal_metadata.stream_ordering is not None
             txn.call_after(
@@ -3002,7 +3000,6 @@ class PersistEventsStore:
             room_id: The room ID of the event that was redacted.
             redacted_event_id: The event that was redacted.
         """
-        x = self.db_pool.simple_select_one_txn
         # Fetch the relations of the event being redacted.
         rows = self.db_pool.simple_select_many_txn(
             txn,

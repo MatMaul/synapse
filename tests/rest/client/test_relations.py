@@ -1176,7 +1176,6 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
 
         def assert_bundle(event_json: JsonDict) -> None:
             """Assert the expected values of the bundled aggregations."""
-            print(event_json)
             relations_dict = event_json["unsigned"].get("m.relations")
 
             # Ensure the fields are as expected.

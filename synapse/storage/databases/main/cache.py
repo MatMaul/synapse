@@ -379,7 +379,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
         for relates_to in relations:
-            self._attempt_to_invalidate_cache("get_relations_for_event", (room_id, relates_to,))
+            self._attempt_to_invalidate_cache(
+                "get_relations_for_event",
+                (
+                    room_id,
+                    relates_to,
+                ),
+            )
             self._attempt_to_invalidate_cache("get_references_for_event", (relates_to,))
             self._attempt_to_invalidate_cache("get_applicable_edit", (relates_to,))
             self._attempt_to_invalidate_cache("get_thread_summary", (relates_to,))
