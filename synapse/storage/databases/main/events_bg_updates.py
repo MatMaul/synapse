@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple, cast
 
 import attr
 
@@ -1239,7 +1239,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     continue
 
                 relations = event_json["content"].get("m.relations")
-                if not relations or not isinstance(relations, list):
+                if not relations or not isinstance(relations, Iterable):
                     relations = [event_json["content"].get("m.relates_to")]
 
                 for relates_to in relations:
@@ -1262,8 +1262,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     if not isinstance(parent_id, str):
                         continue
 
+                    key = relates_to.get("key")
+
                     room_id = event_json["room_id"]
-                    relations_to_insert.append((room_id, event_id, parent_id, rel_type))
+                    relations_to_insert.append((room_id, event_id, parent_id, rel_type, key))
 
             # Insert the missing data, note that we upsert here in case the event
             # has already been processed.
@@ -1271,7 +1273,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 self.db_pool.simple_upsert_many_txn(
                     txn=txn,
                     table="event_relations",
-                    key_names=("event_id", "relates_to_id", "relation_type"),
+                    key_names=("event_id", "relates_to_id", "relation_type", "aggregation_key"),
                     key_values=[r[1:] for r in relations_to_insert],
                     value_names=(),
                     value_values=[],

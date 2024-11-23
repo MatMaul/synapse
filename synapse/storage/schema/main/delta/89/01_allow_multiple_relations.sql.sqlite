@@ -14,4 +14,4 @@
  */
 
 DROP INDEX event_relations_id;
-CREATE UNIQUE INDEX event_relations_id ON event_relations(event_id, relates_to_id, relation_type);
+CREATE UNIQUE INDEX event_relations_id ON event_relations(event_id, relates_to_id, relation_type, aggregation_key);
