@@ -534,7 +534,7 @@ def relations_from_event(event: EventBase) -> List[_EventRelation]:
     """
 
     relations = event.content.get("m.relations")
-    if not relations or not isinstance(relations, list):
+    if not relations or not isinstance(relations, Iterable):
         relations = [event.content.get("m.relates_to")]
 
     ret: List[_EventRelation] = []
