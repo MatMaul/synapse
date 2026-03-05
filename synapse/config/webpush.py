@@ -116,7 +116,7 @@ class WebpushConfig(Config):
             self.load_app_server_key()
             with open(
                 vapid_private_key_path,
-                "w",
+                "wb",
                 opener=lambda p, f: os.open(p, f, mode=0o640),
             ) as vapid_private_key_file:
                 vapid_private_key_file.write(self.vapid.private_pem())
