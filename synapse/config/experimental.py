@@ -622,3 +622,5 @@ class ExperimentalConfig(Config):
 
         # MSC4174: webpush push kind
         self.msc4174_enabled: bool = experimental.get("msc4174_enabled", False)
+
+        self.root.webpush.check_config_conflicts(self.root)

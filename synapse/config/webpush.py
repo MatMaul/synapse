@@ -20,7 +20,7 @@ from py_vapid import b64urlencode, serialization
 from synapse.config.experimental import HAS_PYWEBPUSH
 from synapse.types import JsonDict
 
-from ._base import Config, ConfigError, read_file
+from ._base import Config, ConfigError, RootConfig, read_file
 
 
 class WebpushConfig(Config):
@@ -36,10 +36,7 @@ class WebpushConfig(Config):
         webpush_config = config.get("webpush", {})
         self.enabled = webpush_config.get("enabled", False)
 
-        if self.enabled and not self.root.experimental.msc4174_enabled:
-            raise ConfigError("webpush is enabled but MSC4174 is not enabled")
-
-        if not HAS_PYWEBPUSH:
+        if self.enabled and not HAS_PYWEBPUSH:
             raise ConfigError("webpush is enabled but pywebpush is not installed")
 
         from py_vapid import Vapid
@@ -86,6 +83,13 @@ class WebpushConfig(Config):
                 serialization.PublicFormat.UncompressedPoint,
             )
         )
+
+    def check_config_conflicts(
+        self,
+        root: RootConfig,
+    ) -> None:
+        if self.enabled and not root.experimental.msc4174_enabled:
+            raise ConfigError("webpush is enabled but MSC4174 is not enabled")
 
     def generate_files(self, config: dict[str, Any], config_dir_path: str) -> None:
         webpush_config = config.get("webpush", {})
