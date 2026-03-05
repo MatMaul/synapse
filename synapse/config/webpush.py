@@ -68,7 +68,7 @@ class WebpushConfig(Config):
             vapid_private_key_path, (vapid_private_key_path,)
         ).strip()
 
-        self.vapid = Vapid.from_string(private_key=vapid_private_key)
+        self.vapid = Vapid.from_pem(vapid_private_key)
 
         self.load_app_server_key()
 
