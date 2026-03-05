@@ -68,13 +68,11 @@ class WebpushConfig(Config):
             vapid_private_key_path, (vapid_private_key_path,)
         ).strip()
 
-        if not vapid_private_key:
-            raise ConfigError(
-                "vapid_private_key or vapid_private_key_path must be configured when WebPush is enabled"
-            )
-
         self.vapid = Vapid.from_string(private_key=vapid_private_key)
 
+        self.load_app_server_key()
+
+    def load_app_server_key(self) -> None:
         vapid_public_key = self.vapid.public_key
         assert vapid_public_key is not None
         self.vapid_app_server_key = b64urlencode(
@@ -113,11 +111,12 @@ class WebpushConfig(Config):
             )
 
         if not self.path_exists(vapid_private_key_path):
-            vapid = Vapid()
-            vapid.generate_keys()
+            self.vapid = Vapid()
+            self.vapid.generate_keys()
+            self.load_app_server_key()
             with open(
                 vapid_private_key_path,
                 "w",
                 opener=lambda p, f: os.open(p, f, mode=0o640),
             ) as vapid_private_key_file:
-                vapid.save_key(vapid_private_key_file)
+                self.vapid.save_key(vapid_private_key_file)
