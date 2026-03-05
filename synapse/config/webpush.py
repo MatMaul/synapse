@@ -119,4 +119,4 @@ class WebpushConfig(Config):
                 "w",
                 opener=lambda p, f: os.open(p, f, mode=0o640),
             ) as vapid_private_key_file:
-                self.vapid.save_key(vapid_private_key_file)
+                vapid_private_key_file.write(self.vapid.private_pem())
