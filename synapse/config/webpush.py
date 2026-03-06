@@ -15,7 +15,7 @@
 import os
 from typing import Any
 
-from py_vapid import b64urlencode, serialization
+from py_vapid import b64urldecode, b64urlencode, default_backend, serialization
 
 from synapse.config.experimental import HAS_PYWEBPUSH
 from synapse.types import JsonDict
@@ -68,7 +68,11 @@ class WebpushConfig(Config):
             vapid_private_key_path, (vapid_private_key_path,)
         ).strip()
 
-        self.vapid = Vapid.from_pem(vapid_private_key)
+        deser_vapid_private_key = serialization.load_pem_private_key(
+            b64urldecode(vapid_private_key), password=None, backend=default_backend()
+        )
+
+        self.vapid = Vapid(deser_vapid_private_key)
 
         self.load_app_server_key()
 
